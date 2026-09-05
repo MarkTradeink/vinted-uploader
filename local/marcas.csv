@@ -1,0 +1,14 @@
+marca,tier,multiplicador,notas
+Shein,D,0.4,fast fashion muy barata
+Primark,D,0.5,
+Zara,C,1.0,referencia base
+H&M,C,0.8,
+Mango,C,1.0,
+Bershka,D,0.6,
+Levi's,B,1.6,el denim vintage sube mas
+Nike,B,1.5,
+Adidas,B,1.4,
+The North Face,A,2.2,
+Carhartt,A,2.2,
+Ralph Lauren,A,2.4,
+Patagonia,A,2.4,

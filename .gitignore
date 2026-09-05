@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+credentials.json
+service-account*.json
+token.json
+fotos/
+salida/
+*.jsonl
+.DS_Store
+.idea/
+.vscode/

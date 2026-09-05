@@ -1,172 +1,104 @@
 # Plan de implementación
 
-Seis fases. Las fases 1–3 son el sistema real; la 4 lo automatiza; las 5–6 son mejora
-continua y opcionales. Estimaciones en tardes de trabajo, no en días completos.
+> **Decisión tomada:** todo en n8n, sin código propio que mantener. Volumen previsto
+> 50–300 prendas/mes. El análisis en `01-analisis.md` recomendaba un núcleo en Python
+> primero por el bucle de medición; se descartó a favor de no tocar código. La
+> compensación está en la fase 4.
+
+Estado: **fases 0 a 2 hechas.** Lo que queda son pasos de configuración, no de desarrollo.
 
 ---
 
-## Fase 0 — Preparación (~1 hora)
+## Fase 0 — Diseño ✅
 
-- [ ] Crear el Google Sheet con 4 pestañas: `Prendas`, `Marcas`, `Ventas`, `Config`
-      (esquema completo en `04-esquema-sheet.md`).
-- [ ] Rellenar `Marcas` con las ~40 marcas que más manejas y su tier (A–D). Media hora
-      bien invertida: es la variable más predictiva del precio.
-- [ ] Crear en Drive `/vinted/entrada/`, `/vinted/procesado/`, `/vinted/error/`.
-- [ ] Service Account de Google con acceso al Sheet y a la carpeta de Drive
-      (no OAuth de usuario: el script correrá desatendido).
-- [ ] Leer `03-protocolo-fotos.md` y hacer un lote de prueba de 5 prendas siguiéndolo.
+Análisis, decisiones de arquitectura, protocolo de fotografía y esquema del Sheet.
+Ver `01-analisis.md`, `03-protocolo-fotos.md` y `04-esquema-sheet.md`.
 
-**Sale de aquí:** el Sheet vivo y 25 fotos reales para desarrollar contra ellas.
+## Fase 1 — Workflow de clasificación ✅
+
+Creado en n8n como **[Vinted · Clasificar lote de prendas](https://automation.cifral.io/workflow/3EmHDtZ1D97rPFBW)**
+(`3EmHDtZ1D97rPFBW`), 22 nodos, sin publicar. El código fuente SDK está versionado en
+`n8n/clasificar-lote.sdk.ts`.
+
+Cubre la cadena completa: listado de Drive con EXIF, agrupación adaptativa en prendas,
+deduplicación contra el Sheet, clasificación multiimagen con Claude Opus 5, comparables
+vía Serper, cálculo de precios y score, escritura idempotente en Sheets y aviso por
+Telegram.
+
+## Fase 2 — Precio y fiabilidad ✅
+
+Integrado en el mismo workflow en lugar de ser una fase aparte, porque en n8n separarlo
+habría significado un segundo workflow y una llamada extra.
+
+## Fase 3 — Puesta en marcha ⬜ (te toca a ti, ~40 min)
+
+Crear el Sheet, la carpeta de Drive, rellenar la configuración y lanzar un lote de prueba
+de 5 prendas. Paso a paso en **`05-puesta-en-marcha.md`**.
+
+## Fase 4 — Medición ⬜ (cuando tengas 30 prendas conocidas)
+
+La compensación por no tener el núcleo en código. Se resuelve duplicando el workflow y
+apuntándolo a una carpeta fija y a la pestaña `Eval`. Detalle en
+`05-puesta-en-marcha.md` §6.
+
+Sin esta fase el sistema funciona, pero no sabrás cuánto se equivoca ni si un cambio en el
+prompt mejora algo.
+
+## Fase 5 — Bucle de aprendizaje ⬜ (continuo)
+
+Al vender, rellenas `precio_venta` y `fecha_venta`. Con 10–15 ventas ya puedes recalibrar
+`factorPedidoPagado`. Con ~100, tu histórico predice mejor que cualquier búsqueda web.
+
+## Fase 6 — Opcional, solo si el volumen lo justifica ⬜
+
+Extensión de navegador que rellene el formulario de Vinted desde la fila del Sheet (tú
+logueado, tú pulsas el botón; nunca un bot headless). Retoque automático de fotos.
 
 ---
 
-## Fase 1 — Núcleo de clasificación (~2 tardes)
-
-El corazón. Un comando, una carpeta, filas en el Sheet.
+## Arquitectura tal como quedó
 
 ```
-vinted-uploader procesar ./fotos/lote-2026-09-05 --dry-run
-vinted-uploader procesar ./fotos/lote-2026-09-05 --sheet <id>
+Disparo manual  ─┐
+Programado      ─┴→ Configuracion del lote
+                       ↓
+                    Listar fotos en Drive con EXIF   (HTTP: el nodo de Drive no
+                       ↓                              devuelve imageMediaMetadata)
+                    Leer prendas ya procesadas       (dedup)
+                       ↓
+                    Leer tabla de marcas             (tiers de precio)
+                       ↓
+                    Agrupar fotos en prendas         (clustering EXIF adaptativo)
+                       ↓
+                    Recorrer prendas ──── done ───→ Resumir el lote → Telegram
+                       │
+                       └── por prenda:
+                            Separar fotos → Descargar de Drive → Juntar en un item
+                            → Clasificar con Claude (todas las fotos, 1 llamada)
+                            → Parsear → Buscar comparables (Serper)
+                            → Calcular precios y score  ← aritmética, no LLM
+                            → Escribir en el Sheet      ← idempotente por id_prenda
 ```
 
-- [ ] **Ingesta**: leer carpeta local o de Drive, extraer EXIF, ordenar por timestamp.
-- [ ] **Agrupación**: clustering por hueco temporal con umbral adaptativo (mediana de
-      huecos × 3). Si existen subcarpetas, mandan ellas y se salta el clustering.
-- [ ] **Preproceso**: redimensionar a 1000px lado largo, autorrotar por EXIF. Recorta
-      coste ~40% sin perder legibilidad de etiquetas.
-- [ ] **Llamada de visión** (Claude Opus 5, structured outputs con esquema estricto):
-      todas las fotos de la prenda en un mensaje. Devuelve los campos de clasificación,
-      **la confirmación de agrupación**, y para marca/talla el `origen` del dato
-      (`etiqueta` | `logo` | `inferido`) — este campo alimenta el score.
-- [ ] **Score de fiabilidad**: calculado en código con la tabla de `01-analisis.md`.
-      Nunca pedido al modelo.
-- [ ] **Escritura en Sheets**: una fila por prenda, idempotente por `id_prenda`
-      (hash del contenido de las fotos). Relanzar el mismo lote no duplica.
-- [ ] **Estado en disco**: un `.jsonl` por lote. Si falla la prenda 47 de 60, reanudas
-      desde la 47 sin repagar las 46 primeras.
-- [ ] Prompt caching sobre el bloque de sistema.
+## Decisiones que quedaron fijadas en el workflow
 
-**Criterio de hecho:** 20 prendas reales entran, 20 filas correctas salen, y relanzar el
-comando no duplica ni cobra de nuevo.
-
-**Aquí ya tienes un sistema útil**, aunque los precios todavía sean flojos.
-
----
-
-## Fase 2 — Fundamentar el precio (~1 tarde)
-
-Sin esto los precios son inventos plausibles.
-
-- [ ] Consulta a **Serper** por prenda: `"<marca> <tipo> <talla>" vinted` +
-      una variante en wallapop. Máximo 2 consultas por prenda.
-- [ ] Parsear precios de los resultados, descartar outliers (percentiles 10/90).
-- [ ] **Corrección pedido→pagado**: aplicar el factor de la pestaña `Config`
-      (empieza en 0,65 y ajústalo con tus ventas reales en la Fase 5).
-- [ ] Cruzar con el tier de marca de la pestaña `Marcas` y el estado de la prenda.
-- [ ] Devolver `precio_objetivo`, `precio_min`, `precio_suelo` + `justificacion_precio`
-      en texto (una frase: en qué se basa).
-- [ ] Alimentar el score con `n_comparables` y `dispersion_comparables`.
-
-**Criterio de hecho:** para 10 prendas que ya has vendido, `precio_objetivo` cae dentro de
-±25% del precio real de venta.
-
----
-
-## Fase 3 — Medición y ajuste (~1 tarde, y es la fase que más precisión aporta)
-
-Sin esto estás ajustando el prompt a ojo.
-
-- [ ] **Golden set**: 30 prendas fotografiadas cuyos valores correctos anotas a mano
-      (marca, talla, material, y precio real de venta si la vendiste).
-- [ ] Script `evaluar` que procesa las 30 y saca: % acierto de marca, % de talla,
-      error medio de precio, y calibración del score (¿las de score ≥85 aciertan de
-      verdad más que las de 50–84?).
-- [ ] Iterar el prompt: cambiar → relanzar → comparar. 3 o 4 rondas.
-- [ ] Congelar el prompt cuando dos rondas seguidas no mejoren.
-
-**Criterio de hecho:** una tabla de métricas versionada. Sabes cuánto se equivoca tu
-sistema, que es el requisito para confiar en él.
-
----
-
-## Fase 4 — Automatización con n8n (~medio día)
-
-Ahora que el núcleo es estable, la fontanería.
-
-- [ ] Desplegar el núcleo tras un webhook (Cloud Run o un VPS pequeño; es un contenedor).
-- [ ] Workflow n8n: trigger de Google Drive sobre `/vinted/entrada/` → agrupa el lote →
-      POST al webhook → mueve las fotos a `/procesado/` → **Telegram** con el resumen
-      ("18 prendas, 3 con score <50, valor estimado total 412 €").
-- [ ] Rama de error: fallo → `/vinted/error/` + Telegram con el motivo.
-- [ ] Credenciales que ya tienes: `Google Drive Cifral`, `Google Sheets account_Cifral`,
-      `Anthropic account`, `Serper API`, y cualquiera de los bots de Telegram.
-
-**Criterio de hecho:** sueltas fotos en Drive desde el móvil, y a los minutos te llega un
-Telegram con el lote clasificado.
-
----
-
-## Fase 5 — Bucle de aprendizaje (continuo, ~1 hora de montaje)
-
-Lo que convierte esto en un sistema que mejora en vez de uno que se estanca.
-
-- [ ] Al vender, rellenas 3 columnas: `precio_venta`, `fecha_venta`, `plataforma`.
-- [ ] Informe mensual: sesgo por marca y por categoría (¿estimo sistemáticamente alto en
-      denim?), y recalibración del factor pedido→pagado.
-- [ ] Inyectar tus 20 ventas más parecidas como contexto en la estimación de precio. A
-      partir de ~100 ventas, esto vale más que cualquier búsqueda web.
-
----
-
-## Fase 6 — Opcional, solo si el volumen lo justifica
-
-- [ ] Extensión de navegador que rellena el formulario de Vinted desde la fila del Sheet.
-      Riesgo bajo (tú logueado, tú pulsas). No un bot headless: no vale la pena arriesgar
-      la cuenta.
-- [ ] Retoque de fotos: fondo limpio, recorte, enderezado.
-- [ ] Multi-idioma para vender fuera de España.
-
----
-
-## Stack
-
-| Pieza | Elección | Por qué |
+| Decisión | Dónde vive | Por qué |
 |---|---|---|
-| Lenguaje | Python 3.11+ | Mejor ecosistema de imagen (Pillow, exifread) y SDK de Anthropic |
-| LLM | Claude Opus 5 (`claude-opus-5`) | Lectura de etiquetas y razonamiento de precio; 0,08 €/prenda |
-| Salida estructurada | `output_config.format` con esquema estricto | JSON válido garantizado, sin parseo frágil |
-| Búsqueda | Serper (ya la tienes) | Comparables reales por la vía correcta |
-| Almacén | Google Sheets | Lo editas a mano, y ese es un requisito de verdad |
-| Orquestación | n8n, solo desde la Fase 4 | Disparadores y avisos, no lógica de negocio |
-| Estado | `.jsonl` por lote | Reanudable e idempotente sin base de datos |
+| Agrupación por EXIF, umbral = 3× la mediana de huecos del lote | `Agrupar fotos en prendas` | Se adapta a si fotografías rápido o despacio, sin pedirte disciplina |
+| Margen de 10 minutos antes de procesar | mismo nodo | Evita clasificar un lote a medio subir |
+| Dedup por `id_prenda` (hash de los IDs de foto) | mismo nodo | Relanzar no duplica ni vuelve a pagar; no hace falta mover ficheros |
+| Todas las fotos en **una** llamada de visión | `Juntar fotos en un solo item` | El modelo cruza la etiqueta con la prenda; 5 llamadas sueltas no pueden |
+| `marca_origen` / `talla_origen` obligatorios | prompt de `Clasificar prenda con Claude` | Distinguir dato leído de dato inventado es lo que hace útil el score |
+| **El precio se calcula, no lo dice el LLM** | `Calcular precios y score` | Mediana recortada × factor pedido→pagado × estado. Elimina la alucinación aritmética |
+| **El score se calcula, no se pregunta** | mismo nodo | La autoconfianza declarada de un modelo está mal calibrada |
+| Fallo de Serper o de Claude no tumba la prenda | `onError: continueRegularOutput` | Sale una fila con score bajo y su flag, en vez de perderse |
 
-## Estructura del repositorio
+## Riesgos que quedan vivos
 
-```
-vinted-uploader/
-├── docs/                      # este análisis, el plan, protocolo y esquema
-├── src/vinted_uploader/
-│   ├── cli.py                 # comandos: procesar, evaluar, sync-ventas
-│   ├── ingest.py              # EXIF, orden, redimensionado
-│   ├── grouping.py            # clustering temporal → prendas
-│   ├── classify.py            # llamada de visión + esquema estricto
-│   ├── pricing.py             # Serper, comparables, tier, tres precios
-│   ├── scoring.py             # score determinista de fiabilidad
-│   ├── sheets.py              # escritura idempotente
-│   └── prompts/               # prompts versionados (el activo se congela en Fase 3)
-├── eval/
-│   ├── golden/                # 30 prendas + valores correctos
-│   └── run_eval.py
-└── n8n/workflow.json          # exportado, versionado (Fase 4)
-```
-
-## Riesgos y cómo se gestionan
-
-| Riesgo | Mitigación |
-|---|---|
-| Agrupación incorrecta contamina la ficha | Validación LLM + `flag_agrupacion` + score −20 |
-| Precios inventados con aspecto creíble | Comparables obligatorios; sin ellos el score no llega a 85 |
-| Etiquetas ilegibles | `origen` del dato explícito; el protocolo de fotos es la solución real |
-| Cambio de formato en resultados de búsqueda | Parseo tolerante; si falla, precio sin comparables y score bajo, nunca un número inventado |
-| Coste desbocado en lotes grandes | Tope de gasto por lote en `Config`; el comando aborta y avisa |
-| Deriva de calidad al tocar el prompt | El golden set de la Fase 3 la detecta antes de que llegue a producción |
+| Riesgo | Mitigación actual | Qué harías si se materializa |
+|---|---|---|
+| Sin golden set, la calidad del prompt no es medible | Ninguna hasta la fase 4 | Montar el workflow de eval (`05` §6) |
+| El modelo devuelve algo que no es JSON | Parseo defensivo, `parse_error`, score 0 y flag | Endurecer el prompt; el JSON crudo queda en `respuesta_cruda` |
+| Fotos reenviadas por WhatsApp pierden el EXIF | Recae en `createdTime`, que en una subida masiva es casi idéntico → agrupación mala | Subir siempre el original; o usar subcarpetas por prenda |
+| Serper cambia el formato de respuesta | Regex tolerante; sin precios → `n_comparables` 0 y precio por tier | Ajustar el regex en `Calcular precios y score` |
+| Límite de peticiones de Google Sheets | Una escritura por prenda, con 3 reintentos | A este volumen no debería aparecer |

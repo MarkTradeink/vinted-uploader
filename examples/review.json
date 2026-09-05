@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "batch_id": "example-only",
+  "evaluated_at": "2026-09-05",
+  "items": [{
+    "key": "item-001",
+    "grouping_reviewed": true,
+    "photo_ids": ["P0001"],
+    "primary_photo_id": "P0001",
+    "title": "Jersey azul de cuello redondo",
+    "description": "Jersey azul de manga larga y cuello redondo. Prenda de segunda mano con desgaste visible en los puños.",
+    "size": "Sin confirmar",
+    "condition_visible": "Desgaste visible en puños.",
+    "confirm": ["Fotografiar etiqueta de talla y medir pecho y largo."],
+    "prices": {"vinted": 6, "wallapop": 7, "low": 3, "high": 5},
+    "pricing_basis": "estimate",
+    "pricing_reason": "Ejemplo ficticio de estimación de un básico usado; no es una tasación real.",
+    "source_ids": []
+  }],
+  "sources": [],
+  "excluded_photos": []
+}

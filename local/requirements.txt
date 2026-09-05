@@ -1,6 +1,0 @@
-Pillow>=10.0
-
-# Opcional pero recomendado si fotografias con iPhone (formato HEIC por defecto).
-# Sin este paquete el script sigue funcionando, pero no puede leer la fecha de
-# disparo de los .heic y avisa por pantalla al arrancar.
-pillow-heif>=0.15

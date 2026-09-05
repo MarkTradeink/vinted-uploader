@@ -1,54 +1,97 @@
 # vinted-uploader
 
-Clasificación de prendas de segunda mano: agrupas un lote de fotos, obtienes por cada
-prenda título, descripción, marca, talla, precios recomendados y un score de fiabilidad,
-listo para publicar en Vinted o Wallapop.
+Reusable workflow for reviewing batches of photos, preparing Spanish Vinted and
+Wallapop listings, and extending one Google Sheets inventory.
 
-## Estado
+The CLI indexes photos, creates contact sheets, validates reviewed item data and
+prepares an append plan. The assistant identifies items visually and researches
+prices. Google Sheets updates use the connected Sheets tools or a reviewed manual
+import. **The scripts do not log into Google or publish marketplace listings.**
 
-**Vía recomendada — local + ChatGPT, sin coste variable.** Dos scripts de Python que
-agrupan tus fotos y calculan precio/score, más un GPT personalizado (incluido en tu
-suscripción de ChatGPT) que hace la clasificación y busca comparables. Sin Serper, sin
-API de pago. Ver **[`docs/06-version-manual-sin-apis.md`](docs/06-version-manual-sin-apis.md)**.
+## Next batch
 
-**Vía alternativa, aparcada — n8n + Claude API + Serper.** Completamente automática
-(subes fotos a Drive, sale un Google Sheet solo) pero con coste variable por prenda y
-sujeta a la cuota de Serper. El workflow ya existe, creado y sin publicar:
-[Vinted · Clasificar lote de prendas](https://automation.cifral.io/workflow/3EmHDtZ1D97rPFBW)
-(`3EmHDtZ1D97rPFBW`). Detalles en [`docs/05-puesta-en-marcha.md`](docs/05-puesta-en-marcha.md).
+Open this repository with your assistant and paste [the bulk prompt](prompts/bulk-items.md).
+Fill in the photo folder and choose `prepare` or `append`. The short version is:
 
-## Documentación
+> Process the new photos in `<folder>` using `prompts/bulk-items.md` and
+> `config.local.json`. Read the latest master inventory, skip existing items,
+> visually review each item, research euro prices and write Spanish listings.
+> Append the new items to the same master sheet, preserving my edits and sales data.
+> Report unresolved details. Do not publish marketplace listings.
 
-| Documento | Contenido |
-|---|---|
-| [`docs/01-analisis.md`](docs/01-analisis.md) | Dónde está el valor real, costes, y qué **no** va a hacer bien (histórico, escrito para la vía API) |
-| [`docs/02-plan.md`](docs/02-plan.md) | Estado de fases y arquitectura de la vía n8n |
-| [`docs/03-protocolo-fotos.md`](docs/03-protocolo-fotos.md) | Cómo fotografiar. La palanca más grande del sistema, y no es código — vale para ambas vías |
-| [`docs/04-esquema-sheet.md`](docs/04-esquema-sheet.md) | Columnas del Sheet/CSV — vale para ambas vías |
-| [`docs/05-puesta-en-marcha.md`](docs/05-puesta-en-marcha.md) | Puesta en marcha de la vía n8n (aparcada) |
-| [`docs/06-version-manual-sin-apis.md`](docs/06-version-manual-sin-apis.md) | **Vía recomendada actual**: por qué el cambio, arquitectura y uso paso a paso |
-| [`local/agrupar_fotos.py`](local/agrupar_fotos.py) | Agrupa fotos locales en prendas por EXIF — gratis, sin red |
-| [`local/plantilla_gpt.md`](local/plantilla_gpt.md) | Instrucciones para crear el GPT personalizado "Tasador Vinted" |
-| [`local/parsear_respuestas.py`](local/parsear_respuestas.py) | Convierte las respuestas del GPT en un CSV con precio y score calculados |
-| [`n8n/clasificar-lote.sdk.ts`](n8n/clasificar-lote.sdk.ts) | Código fuente del workflow de n8n (vía aparcada), versionado |
+`config.local.json` stores the owner's master spreadsheet reference locally and is
+ignored by Git. On another machine, copy this file privately or create it from
+`config.example.json`. Do not commit it to this public repository.
 
-## Las decisiones que definen el sistema, en cualquiera de las dos vías
+## Setup
 
-1. **Agrupación por timestamp EXIF** con umbral adaptativo (3× la mediana de huecos del
-   propio lote), no por convención de nombres ni por visión. Cero disciplina al
-   fotografiar, y los casos dudosos se marcan en lugar de adivinarse.
-2. **El precio se fundamenta en comparables reales, no en el prior del modelo**, y se
-   calcula con una fórmula fija en vez de dejar que el LLM suelte un número. El modelo
-   hace percepción; la aritmética la hace el código.
-3. **El score de fiabilidad se calcula, no se le pregunta al LLM.** La autoconfianza
-   declarada de un modelo está mal calibrada; una suma de señales observadas no. Y puedes
-   subirlo cambiando cómo fotografías, que es todo el sentido de tener un score.
-4. **La subida a Vinted sigue siendo manual.** No hay API pública y el riesgo de perder una
-   cuenta de vendedor con valoraciones supera con creces los dos minutos que se ahorran.
+Python 3.11 or newer:
 
-## Coste
+```powershell
+python -m pip install -r requirements.txt
+python -m vinted_batch --help
+python -m unittest discover -s tests -v
+```
 
-**Vía recomendada:** cero coste variable — todo dentro de tu suscripción de ChatGPT y de
-Python local. Tu tiempo es el coste: unos 30-45 segundos por prenda.
+In the desktop workspace, the assistant can use the bundled Python and Pillow
+runtime instead of installing dependencies. HEIC/HEIF decoding additionally needs
+`pillow-heif`. Unreadable photos remain visible in the manifest and must be resolved
+or explicitly excluded with a reason.
 
-**Vía aparcada (n8n):** unos 0,08 € por prenda con Claude Opus 5, más la cuota de Serper.
+## Local workflow
+
+Run from the repository root. Use a new output directory for each run.
+
+```powershell
+python -m vinted_batch prepare "C:/Photos/NewBatch" --out .local/batches/2026-10-01
+```
+
+Review the numbered contact sheets and original label/defect photos. Populate
+`review.json` using [the example](examples/review.json). Every photo must belong to
+one item or have an exclusion reason. Times and folders can help ordering; they do
+not prove where one item ends and another begins.
+
+Download a **fresh** XLSX export of the existing master Google Sheet, then:
+
+```powershell
+python -m vinted_batch snapshot .local/master-latest.xlsx --out .local/master-before.json
+python -m vinted_batch validate --manifest .local/batches/2026-10-01/manifest.json --batch .local/batches/2026-10-01/review.json
+python -m vinted_batch plan --manifest .local/batches/2026-10-01/manifest.json --batch .local/batches/2026-10-01/review.json --master .local/master-before.json --registry .local/baseline-registry.json --out .local/plans/2026-10-01
+```
+
+Omit `--registry` on first use if no photo hashes have been recorded yet. Repeat
+`--registry` for receipts from later batches. Without hashes, duplicate detection
+only uses exact relative filenames, not renamed files or visually similar photos.
+Hash matching detects byte-identical renamed copies, not resized/re-encoded copies.
+
+The plan contains exact proposed rows for `Precios`, `Anuncios`, `Fotos`, and
+`Fuentes`, allocated IDs, summary formula updates and pending manual adjustments.
+CSV files are review/import aids; do not replace the master sheets with them.
+Read [the master-sheet procedure](docs/master-sheet.md) before applying a plan.
+
+After applying and downloading a new export:
+
+```powershell
+python -m vinted_batch snapshot .local/master-after.xlsx --out .local/master-after.json
+python -m vinted_batch verify-applied --plan .local/plans/2026-10-01/append-plan.json --master .local/master-after.json --receipt .local/receipts/2026-10-01.json
+```
+
+This checks appended cells and proposed summary formulas before recording hashes.
+Do not record an append receipt before confirming that Google Sheets contains the rows.
+
+## Files and boundaries
+
+- [AGENTS.md](AGENTS.md): instructions for future assistants.
+- [Bulk prompt](prompts/bulk-items.md): reusable task template.
+- [Photo guide](docs/photos.md): useful angles, labels and measurements.
+- [Data contract](docs/data-contract.md): review fields and pricing evidence.
+- [Master-sheet procedure](docs/master-sheet.md): preserving the existing inventory.
+- `vinted_batch/`: local scripts; no paid AI API keys, marketplace credentials or n8n dependency.
+- `.local/`: private config, batches, snapshots, hash registries and receipts.
+
+The September 2026 baseline contains 38 items and 212 photo files. It is a local
+reference, not a substitute for reading the current Google Sheet. IDs always come
+from the current master, never from that count.
+
+The former implementation remains recoverable in Git history. Rebuilding this
+repository does not modify any previously deployed external n8n workflow.

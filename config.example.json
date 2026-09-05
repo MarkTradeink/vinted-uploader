@@ -1,0 +1,9 @@
+{
+  "master_spreadsheet_id": "PASTE_GOOGLE_SHEETS_ID_HERE",
+  "master_sheet_url": "PASTE_GOOGLE_SHEETS_URL_HERE",
+  "photo_root": "PATH_TO_PHOTOS",
+  "market": "ES",
+  "currency": "EUR",
+  "listing_language": "es",
+  "baseline_registry": ".local/baseline-registry.json"
+}

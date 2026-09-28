@@ -3,10 +3,18 @@
 Reusable workflow for reviewing batches of photos, preparing Spanish Vinted and
 Wallapop listings, and extending one Google Sheets inventory.
 
+## Desktop app (Spanish)
+
+Run **`Iniciar app.bat`** for the local Python desktop app. First-time setup:
+**`Instalar app.bat`**. Review drafts/photos, import a recent master XLSX, optionally
+generate copy with OpenAI and find visual matches with Google Cloud Vision, then
+fill Vinted in visible Chrome using Selenium. The seller completes category/shipping
+and presses Publish in Vinted. [Setup, limits and workflow](docs/desktop-app.md).
+
 The CLI indexes photos, creates contact sheets, validates reviewed item data and
 prepares an append plan. The assistant identifies items visually and researches
 prices. Google Sheets updates use the connected Sheets tools or a reviewed manual
-import. **The scripts do not log into Google or publish marketplace listings.**
+import. **The CLI does not log into Google or publish marketplace listings.**
 
 ## Next batch
 

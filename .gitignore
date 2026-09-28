@@ -25,3 +25,7 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+# Selenium Manager may choose the working directory when HOME is restricted.
+chromedriver/
+se-metadata.json
+selenium-manager.json
